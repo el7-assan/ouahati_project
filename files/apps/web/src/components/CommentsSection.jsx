@@ -4,7 +4,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext.jsx';
-import pb from '@/lib/pocketbaseClient';
+import { db } from '@/lib/firebaseClient';
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  query,
+  where,
+  orderBy,
+  getDocs,
+  updateDoc,
+  getDoc,
+  serverTimestamp
+} from 'firebase/firestore';
 
 const CommentsSection = ({ postId, onCommentAdded }) => {
   const { user } = useAuth();
@@ -17,12 +30,13 @@ const CommentsSection = ({ postId, onCommentAdded }) => {
   const fetchComments = async () => {
     try {
       setLoading(true);
-      const data = await pb.collection('comments').getFullList({
-        filter: `post_id = "${postId}"`,
-        sort: 'created',
-        expand: 'author_id',
-        $autoCancel: false
-      });
+      const q = query(
+        collection(db, 'comments'),
+        where('post_id', '==', postId),
+        orderBy('created', 'asc')
+      );
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setComments(data);
     } catch (error) {
       console.error('Error fetching comments:', error);
@@ -41,17 +55,20 @@ const CommentsSection = ({ postId, onCommentAdded }) => {
 
     try {
       setSubmitting(true);
-      await pb.collection('comments').create({
+      await addDoc(collection(db, 'comments'), {
         post_id: postId,
-        author_id: user.id,
-        content: newComment.trim()
-      }, { $autoCancel: false });
+        author_id: user.uid,
+        author_name: user.displayName || 'مستخدم',
+        content: newComment.trim(),
+        created: serverTimestamp()
+      });
 
       // Update post comment count
-      const post = await pb.collection('posts').getOne(postId, { $autoCancel: false });
-      await pb.collection('posts').update(postId, { 
-        comments_count: (post.comments_count || 0) + 1 
-      }, { $autoCancel: false });
+      const postRef = doc(db, 'posts', postId);
+      const postSnap = await getDoc(postRef);
+      await updateDoc(postRef, {
+        comments_count: (postSnap.data().comments_count || 0) + 1
+      });
 
       setNewComment('');
       fetchComments();
@@ -67,16 +84,16 @@ const CommentsSection = ({ postId, onCommentAdded }) => {
   const handleDelete = async (commentId) => {
     if (!window.confirm('حذف هذا التعليق؟')) return;
     try {
-      await pb.collection('comments').delete(commentId, { $autoCancel: false });
-      
-      // Update post comment count
-      const post = await pb.collection('posts').getOne(postId, { $autoCancel: false });
-      await pb.collection('posts').update(postId, { 
-        comments_count: Math.max(0, (post.comments_count || 1) - 1) 
-      }, { $autoCancel: false });
+      await deleteDoc(doc(db, 'comments', commentId));
+
+      const postRef = doc(db, 'posts', postId);
+      const postSnap = await getDoc(postRef);
+      await updateDoc(postRef, {
+        comments_count: Math.max(0, (postSnap.data().comments_count || 1) - 1)
+      });
 
       fetchComments();
-      if (onCommentAdded) onCommentAdded(); // Trigger parent update
+      if (onCommentAdded) onCommentAdded();
     } catch (error) {
       console.error('Error deleting comment:', error);
       toast({ title: 'خطأ', description: 'فشل في حذف التعليق', variant: 'destructive' });
@@ -96,18 +113,16 @@ const CommentsSection = ({ postId, onCommentAdded }) => {
               <div className="flex justify-between items-start mb-2">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 bg-[var(--green-pale)] rounded-full flex items-center justify-center text-[var(--green-deep)]">
-                    {comment.expand?.author_id?.avatar ? (
-                      <img src={pb.files.getUrl(comment.expand.author_id, comment.expand.author_id.avatar)} alt="avatar" className="w-full h-full rounded-full object-cover" />
-                    ) : (
-                      <User className="w-4 h-4" />
-                    )}
+                    <User className="w-4 h-4" />
                   </div>
                   <div>
-                    <p className="font-cairo font-bold text-sm text-gray-800">{comment.expand?.author_id?.name || 'مستخدم'}</p>
-                    <p className="text-xs text-gray-400 font-cairo" dir="ltr">{new Date(comment.created).toLocaleString('ar-MA')}</p>
+                    <p className="font-cairo font-bold text-sm text-gray-800">{comment.author_name || 'مستخدم'}</p>
+                    <p className="text-xs text-gray-400 font-cairo">
+                      {comment.created?.toDate ? new Date(comment.created.toDate()).toLocaleString('ar-MA') : ''}
+                    </p>
                   </div>
                 </div>
-                {user?.id === comment.author_id && (
+                {user?.uid === comment.author_id && (
                   <button onClick={() => handleDelete(comment.id)} className="text-red-400 hover:text-red-600 p-1">
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -118,7 +133,7 @@ const CommentsSection = ({ postId, onCommentAdded }) => {
           ))
         )}
       </div>
-      
+
       <form onSubmit={handleSubmit} className="p-3 bg-white border-t border-gray-200 flex gap-2 rounded-b-lg">
         <Input
           value={newComment}

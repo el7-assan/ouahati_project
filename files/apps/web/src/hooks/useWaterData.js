@@ -1,5 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import pb from '@/lib/pocketbaseClient';
+import { db } from '@/lib/firebaseClient';
+import {
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  where,
+  limit
+} from 'firebase/firestore';
 
 export const useWaterData = (refreshInterval = 300000) => {
   const [data, setData] = useState([]);
@@ -12,23 +20,25 @@ export const useWaterData = (refreshInterval = 300000) => {
     try {
       setLoading(true);
       setError(null);
-      
-      // Fetch latest 7 days of data
+
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      
-      const records = await pb.collection('water_sensor_data').getList(1, 100, {
-        sort: '-timestamp',
-        filter: `timestamp >= "${sevenDaysAgo.toISOString()}"`,
-        $autoCancel: false
-      });
 
-      if (records.items.length > 0) {
-        setCurrentLevel(records.items[0].water_level);
-        setStatus(records.items[0].sensor_status || 'connected');
-        
-        // Format for chart
-        const formattedData = records.items.reverse().map(item => ({
+      const q = query(
+        collection(db, 'water_sensor_data'),
+        where('timestamp', '>=', sevenDaysAgo.toISOString()),
+        orderBy('timestamp', 'desc'),
+        limit(100)
+      );
+
+      const snapshot = await getDocs(q);
+
+      if (!snapshot.empty) {
+        const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setCurrentLevel(items[0].water_level);
+        setStatus(items[0].sensor_status || 'connected');
+
+        const formattedData = [...items].reverse().map(item => ({
           time: new Date(item.timestamp).toLocaleTimeString('ar-MA', { hour: '2-digit', minute: '2-digit' }),
           date: new Date(item.timestamp).toLocaleDateString('ar-MA', { month: 'short', day: 'numeric' }),
           level: item.water_level
@@ -48,7 +58,6 @@ export const useWaterData = (refreshInterval = 300000) => {
 
   useEffect(() => {
     fetchData();
-    
     const interval = setInterval(fetchData, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchData, refreshInterval]);

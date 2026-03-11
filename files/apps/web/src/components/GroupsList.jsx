@@ -6,7 +6,18 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext.jsx';
-import pb from '@/lib/pocketbaseClient';
+import { db } from '@/lib/firebaseClient';
+import {
+  collection,
+  getDocs,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+  query,
+  where,
+  serverTimestamp
+} from 'firebase/firestore';
 import CreateGroupForm from './CreateGroupForm.jsx';
 
 const GroupsList = () => {
@@ -21,20 +32,14 @@ const GroupsList = () => {
   const fetchGroupsAndMemberships = async () => {
     try {
       setLoading(true);
-      // Fetch all groups
-      const groupsData = await pb.collection('groups').getFullList({
-        sort: '-created',
-        $autoCancel: false
-      });
+      const snapshot = await getDocs(collection(db, 'groups'));
+      const groupsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setGroups(groupsData);
 
-      // Fetch user's memberships
       if (user) {
-        const memberships = await pb.collection('group_members').getFullList({
-          filter: `user_id = "${user.id}"`,
-          $autoCancel: false
-        });
-        setUserMemberships(memberships.map(m => m.group_id));
+        const q = query(collection(db, 'group_members'), where('user_id', '==', user.uid));
+        const membersSnapshot = await getDocs(q);
+        setUserMemberships(membersSnapshot.docs.map(d => d.data().group_id));
       }
     } catch (error) {
       console.error('Error fetching groups:', error);
@@ -51,27 +56,32 @@ const GroupsList = () => {
   const handleJoinToggle = async (groupId, isMember) => {
     try {
       if (isMember) {
-        // Leave group
-        const membership = await pb.collection('group_members').getFirstListItem(`group_id="${groupId}" && user_id="${user.id}"`, { $autoCancel: false });
-        await pb.collection('group_members').delete(membership.id, { $autoCancel: false });
-        
-        // Update group count
+        const q = query(
+          collection(db, 'group_members'),
+          where('group_id', '==', groupId),
+          where('user_id', '==', user.uid)
+        );
+        const snapshot = await getDocs(q);
+        snapshot.docs.forEach(d => deleteDoc(doc(db, 'group_members', d.id)));
+
         const group = groups.find(g => g.id === groupId);
-        await pb.collection('groups').update(groupId, { members_count: Math.max(0, (group.members_count || 1) - 1) }, { $autoCancel: false });
-        
+        await updateDoc(doc(db, 'groups', groupId), {
+          members_count: Math.max(0, (group.members_count || 1) - 1)
+        });
+
         toast({ title: 'ℹ️ تم المغادرة', description: 'لقد غادرت المجموعة' });
       } else {
-        // Join group
-        await pb.collection('group_members').create({
+        await addDoc(collection(db, 'group_members'), {
           group_id: groupId,
-          user_id: user.id,
-          joined_at: new Date().toISOString()
-        }, { $autoCancel: false });
-        
-        // Update group count
+          user_id: user.uid,
+          joined_at: serverTimestamp()
+        });
+
         const group = groups.find(g => g.id === groupId);
-        await pb.collection('groups').update(groupId, { members_count: (group.members_count || 0) + 1 }, { $autoCancel: false });
-        
+        await updateDoc(doc(db, 'groups', groupId), {
+          members_count: (group.members_count || 0) + 1
+        });
+
         toast({ title: '✅ تم الانضمام', description: 'لقد انضممت إلى المجموعة بنجاح' });
       }
       fetchGroupsAndMemberships();
@@ -81,21 +91,23 @@ const GroupsList = () => {
     }
   };
 
-  const filteredGroups = groups.filter(g => g.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredGroups = groups.filter(g =>
+    g.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
         <div className="relative w-full md:w-96">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-          <Input 
-            placeholder="ابحث عن مجموعة..." 
+          <Input
+            placeholder="ابحث عن مجموعة..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-4 pr-10 font-cairo"
           />
         </div>
-        <Button 
+        <Button
           onClick={() => setIsCreateModalOpen(true)}
           className="w-full md:w-auto bg-[var(--green-mid)] hover:bg-[var(--green-deep)] text-white font-cairo"
         >
@@ -109,12 +121,12 @@ const GroupsList = () => {
           <DialogHeader>
             <DialogTitle className="font-cairo text-right text-xl text-[var(--green-deep)]">إنشاء مجموعة جديدة</DialogTitle>
           </DialogHeader>
-          <CreateGroupForm 
+          <CreateGroupForm
             onSuccess={() => {
               setIsCreateModalOpen(false);
               fetchGroupsAndMemberships();
-            }} 
-            onCancel={() => setIsCreateModalOpen(false)} 
+            }}
+            onCancel={() => setIsCreateModalOpen(false)}
           />
         </DialogContent>
       </Dialog>
@@ -142,7 +154,7 @@ const GroupsList = () => {
           {filteredGroups.map((group, index) => {
             const isMember = userMemberships.includes(group.id);
             return (
-              <motion.div 
+              <motion.div
                 key={group.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -151,11 +163,7 @@ const GroupsList = () => {
               >
                 <div className="h-32 bg-gray-100 relative">
                   {group.cover_image ? (
-                    <img 
-                      src={pb.files.getUrl(group, group.cover_image)} 
-                      alt={group.name} 
-                      className="w-full h-full object-cover"
-                    />
+                    <img src={group.cover_image} alt={group.name} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-[var(--green-pale)] to-[var(--sand)]">
                       <ImageIcon className="w-10 h-10 text-[var(--green-mid)] opacity-50" />
@@ -171,7 +179,7 @@ const GroupsList = () => {
                   <p className="text-gray-600 font-cairo text-sm mb-4 line-clamp-2 flex-grow">
                     {group.description || 'لا يوجد وصف لهذه المجموعة.'}
                   </p>
-                  <Button 
+                  <Button
                     onClick={() => handleJoinToggle(group.id, isMember)}
                     variant={isMember ? "outline" : "default"}
                     className={`w-full font-cairo ${!isMember ? 'bg-[var(--gold)] hover:bg-[var(--gold-light)] text-white' : 'border-red-200 text-red-600 hover:bg-red-50'}`}

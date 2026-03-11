@@ -7,7 +7,18 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext.jsx';
-import pb from '@/lib/pocketbaseClient';
+import { db } from '@/lib/firebaseClient';
+import {
+  collection,
+  addDoc,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  serverTimestamp
+} from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 const ProductionTracking = () => {
@@ -27,11 +38,13 @@ const ProductionTracking = () => {
     if (!user) return;
     try {
       setLoading(true);
-      const data = await pb.collection('production_records').getFullList({
-        filter: `user_id = "${user.id}"`,
-        sort: '-date',
-        $autoCancel: false
-      });
+      const q = query(
+        collection(db, 'production_records'),
+        where('user_id', '==', user.uid),
+        orderBy('date', 'desc')
+      );
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setRecords(data);
     } catch (error) {
       console.error('Error fetching production records:', error);
@@ -53,13 +66,15 @@ const ProductionTracking = () => {
     }
 
     try {
-      await pb.collection('production_records').create({
-        ...formData,
-        user_id: user.id,
+      await addDoc(collection(db, 'production_records'), {
+        crop_name: formData.crop_name,
         quantity: Number(formData.quantity),
         price_per_unit: Number(formData.price_per_unit),
-      }, { $autoCancel: false });
-      
+        date: formData.date,
+        user_id: user.uid,
+        created: serverTimestamp()
+      });
+
       toast({ title: '✅ تم بنجاح', description: 'تمت إضافة سجل الإنتاج' });
       setIsDialogOpen(false);
       setFormData({ crop_name: '', quantity: '', price_per_unit: '', date: new Date().toISOString().split('T')[0] });
@@ -73,7 +88,7 @@ const ProductionTracking = () => {
   const handleDelete = async (id) => {
     if (!window.confirm('هل أنت متأكد من حذف هذا السجل؟')) return;
     try {
-      await pb.collection('production_records').delete(id, { $autoCancel: false });
+      await deleteDoc(doc(db, 'production_records', id));
       toast({ title: '🗑️ تم الحذف', description: 'تم حذف السجل بنجاح' });
       fetchRecords();
     } catch (error) {
@@ -84,7 +99,6 @@ const ProductionTracking = () => {
 
   const totalRevenue = records.reduce((sum, record) => sum + (record.quantity * record.price_per_unit), 0);
 
-  // Prepare chart data (aggregate by crop)
   const chartDataMap = records.reduce((acc, record) => {
     if (!acc[record.crop_name]) {
       acc[record.crop_name] = { name: record.crop_name, quantity: 0, revenue: 0 };
@@ -122,40 +136,40 @@ const ProductionTracking = () => {
               <form onSubmit={handleSubmit} className="space-y-4 mt-4">
                 <div>
                   <Label className="font-cairo">المحصول</Label>
-                  <Input 
-                    value={formData.crop_name} 
-                    onChange={e => setFormData({...formData, crop_name: e.target.value})} 
-                    placeholder="مثال: طماطم، تمر..." 
+                  <Input
+                    value={formData.crop_name}
+                    onChange={e => setFormData({...formData, crop_name: e.target.value})}
+                    placeholder="مثال: طماطم، تمر..."
                     className="font-cairo mt-1"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <Label className="font-cairo">الكمية (كلغ)</Label>
-                    <Input 
-                      type="number" 
-                      value={formData.quantity} 
-                      onChange={e => setFormData({...formData, quantity: e.target.value})} 
+                    <Input
+                      type="number"
+                      value={formData.quantity}
+                      onChange={e => setFormData({...formData, quantity: e.target.value})}
                       className="font-cairo mt-1"
                     />
                   </div>
                   <div>
                     <Label className="font-cairo">السعر للوحدة (درهم)</Label>
-                    <Input 
-                      type="number" 
+                    <Input
+                      type="number"
                       step="0.01"
-                      value={formData.price_per_unit} 
-                      onChange={e => setFormData({...formData, price_per_unit: e.target.value})} 
+                      value={formData.price_per_unit}
+                      onChange={e => setFormData({...formData, price_per_unit: e.target.value})}
                       className="font-cairo mt-1"
                     />
                   </div>
                 </div>
                 <div>
                   <Label className="font-cairo">التاريخ</Label>
-                  <Input 
-                    type="date" 
-                    value={formData.date} 
-                    onChange={e => setFormData({...formData, date: e.target.value})} 
+                  <Input
+                    type="date"
+                    value={formData.date}
+                    onChange={e => setFormData({...formData, date: e.target.value})}
                     className="font-cairo mt-1"
                   />
                 </div>

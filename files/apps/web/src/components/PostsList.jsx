@@ -3,7 +3,14 @@ import { Plus, Filter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import pb from '@/lib/pocketbaseClient';
+import { db } from '@/lib/firebaseClient';
+import {
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  where
+} from 'firebase/firestore';
 import PostCard from './PostCard.jsx';
 import CreatePostForm from './CreatePostForm.jsx';
 
@@ -18,18 +25,22 @@ const PostsList = () => {
   const fetchPosts = async () => {
     try {
       setLoading(true);
-      let filter = '';
+      let q;
       if (selectedGroupFilter) {
-        filter = `group_id = "${selectedGroupFilter}"`;
+        q = query(
+          collection(db, 'posts'),
+          where('group_id', '==', selectedGroupFilter),
+          orderBy('created', 'desc')
+        );
+      } else {
+        q = query(
+          collection(db, 'posts'),
+          orderBy('created', 'desc')
+        );
       }
-
-      const data = await pb.collection('posts').getList(1, 20, {
-        sort: '-created',
-        filter: filter,
-        expand: 'author_id,group_id',
-        $autoCancel: false
-      });
-      setPosts(data.items);
+      const snapshot = await getDocs(q);
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setPosts(data);
     } catch (error) {
       console.error('Error fetching posts:', error);
       toast({ title: 'خطأ', description: 'فشل في جلب المنشورات', variant: 'destructive' });
@@ -40,7 +51,8 @@ const PostsList = () => {
 
   const fetchGroups = async () => {
     try {
-      const data = await pb.collection('groups').getFullList({ sort: 'name', $autoCancel: false });
+      const snapshot = await getDocs(collection(db, 'groups'));
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setGroups(data);
     } catch (error) {
       console.error('Error fetching groups:', error);
@@ -59,7 +71,7 @@ const PostsList = () => {
     <div className="max-w-2xl mx-auto space-y-6">
       {/* Controls */}
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-xl shadow-sm">
-        <Button 
+        <Button
           onClick={() => setIsCreateModalOpen(true)}
           className="w-full sm:w-auto bg-[var(--green-mid)] hover:bg-[var(--green-deep)] text-white font-cairo"
         >
@@ -69,7 +81,7 @@ const PostsList = () => {
 
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <Filter className="w-5 h-5 text-gray-400" />
-          <select 
+          <select
             value={selectedGroupFilter}
             onChange={(e) => setSelectedGroupFilter(e.target.value)}
             className="w-full sm:w-48 p-2 border border-gray-200 rounded-md font-cairo text-sm focus:outline-none focus:ring-1 focus:ring-[var(--green-mid)] bg-gray-50"
@@ -87,12 +99,12 @@ const PostsList = () => {
           <DialogHeader>
             <DialogTitle className="font-cairo text-right text-xl text-[var(--green-deep)]">إنشاء مشاركة جديدة</DialogTitle>
           </DialogHeader>
-          <CreatePostForm 
+          <CreatePostForm
             onSuccess={() => {
               setIsCreateModalOpen(false);
               fetchPosts();
-            }} 
-            onCancel={() => setIsCreateModalOpen(false)} 
+            }}
+            onCancel={() => setIsCreateModalOpen(false)}
           />
         </DialogContent>
       </Dialog>
@@ -122,9 +134,9 @@ const PostsList = () => {
           </div>
         ) : (
           posts.map(post => (
-            <PostCard 
-              key={post.id} 
-              post={post} 
+            <PostCard
+              key={post.id}
+              post={post}
               onUpdate={fetchPosts}
               onDelete={(id) => setPosts(posts.filter(p => p.id !== id))}
             />

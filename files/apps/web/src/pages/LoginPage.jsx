@@ -11,18 +11,20 @@ import { useToast } from '@/hooks/use-toast';
 
 const LoginPage = () => {
   const navigate = useNavigate();
-  const { login } = useAuth();
+  const { login, register } = useAuth();
   const { toast } = useToast();
+  const [isLogin, setIsLogin] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
   });
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!formData.name || !formData.email || !formData.password) {
+
+    if (!formData.email || !formData.password) {
       toast({
         title: '⚠️ خطأ',
         description: 'يرجى ملء جميع الحقول',
@@ -31,17 +33,39 @@ const LoginPage = () => {
       return;
     }
 
-    login({
-      name: formData.name,
-      email: formData.email,
-    });
-
-    toast({
-      title: '✅ مرحباً بك!',
-      description: `أهلاً ${formData.name}، تم تسجيل الدخول بنجاح`,
-    });
-
-    navigate('/city-selection');
+    try {
+      setLoading(true);
+      if (isLogin) {
+        await login(formData.email, formData.password);
+        toast({
+          title: '✅ مرحباً بك!',
+          description: 'تم تسجيل الدخول بنجاح',
+        });
+      } else {
+        if (!formData.name) {
+          toast({
+            title: '⚠️ خطأ',
+            description: 'يرجى إدخال الاسم',
+            variant: 'destructive',
+          });
+          return;
+        }
+        await register(formData.name, formData.email, formData.password);
+        toast({
+          title: '✅ تم إنشاء الحساب!',
+          description: 'مرحباً بك في واحتي',
+        });
+      }
+      navigate('/city-selection');
+    } catch (error) {
+      toast({
+        title: '❌ خطأ',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleWhatsAppShare = () => {
@@ -61,28 +85,17 @@ const LoginPage = () => {
     <>
       <Helmet>
         <title>تسجيل الدخول - واحتي</title>
-        <meta
-          name="description"
-          content="سجل الدخول إلى واحتي - تطبيق التقويم الزراعي للواحات المغربية"
-        />
       </Helmet>
 
       <div className="min-h-screen bg-gradient-to-br from-[var(--green-deep)] via-[var(--green-mid)] to-[var(--green-light)] flex items-center justify-center p-4">
-        {/* Decorative circles */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <motion.div
-            animate={{
-              scale: [1, 1.2, 1],
-              opacity: [0.1, 0.2, 0.1],
-            }}
+            animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.2, 0.1] }}
             transition={{ duration: 8, repeat: Infinity }}
             className="absolute top-20 right-20 w-64 h-64 bg-white rounded-full blur-3xl"
           />
           <motion.div
-            animate={{
-              scale: [1, 1.3, 1],
-              opacity: [0.1, 0.15, 0.1],
-            }}
+            animate={{ scale: [1, 1.3, 1], opacity: [0.1, 0.15, 0.1] }}
             transition={{ duration: 10, repeat: Infinity }}
             className="absolute bottom-20 left-20 w-96 h-96 bg-white rounded-full blur-3xl"
           />
@@ -93,7 +106,6 @@ const LoginPage = () => {
           animate={{ opacity: 1, y: 0 }}
           className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-md relative z-10"
         >
-          {/* Logo */}
           <div className="text-center mb-8">
             <motion.div
               initial={{ scale: 0 }}
@@ -111,22 +123,43 @@ const LoginPage = () => {
             </p>
           </div>
 
-          {/* Form */}
+          {/* Toggle */}
+          <div className="flex mb-6 bg-gray-100 rounded-xl p-1">
+            <button
+              onClick={() => setIsLogin(true)}
+              className={`flex-1 py-2 rounded-lg font-cairo transition-all ${
+                isLogin ? 'bg-white shadow text-[var(--green-deep)] font-bold' : 'text-gray-500'
+              }`}
+            >
+              تسجيل الدخول
+            </button>
+            <button
+              onClick={() => setIsLogin(false)}
+              className={`flex-1 py-2 rounded-lg font-cairo transition-all ${
+                !isLogin ? 'bg-white shadow text-[var(--green-deep)] font-bold' : 'text-gray-500'
+              }`}
+            >
+              حساب جديد
+            </button>
+          </div>
+
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="name" className="font-cairo text-right block mb-2">
-                الاسم الكامل
-              </Label>
-              <Input
-                id="name"
-                type="text"
-                value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="أدخل اسمك الكامل"
-                className="text-right font-cairo text-gray-900"
-                dir="rtl"
-              />
-            </div>
+            {!isLogin && (
+              <div>
+                <Label htmlFor="name" className="font-cairo text-right block mb-2">
+                  الاسم الكامل
+                </Label>
+                <Input
+                  id="name"
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  placeholder="أدخل اسمك الكامل"
+                  className="text-right font-cairo"
+                  dir="rtl"
+                />
+              </div>
+            )}
 
             <div>
               <Label htmlFor="email" className="font-cairo text-right block mb-2">
@@ -138,7 +171,7 @@ const LoginPage = () => {
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder="example@email.com"
-                className="text-right font-cairo text-gray-900"
+                className="text-right font-cairo"
                 dir="rtl"
               />
             </div>
@@ -153,20 +186,20 @@ const LoginPage = () => {
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 placeholder="أدخل كلمة المرور"
-                className="text-right font-cairo text-gray-900"
+                className="text-right font-cairo"
                 dir="rtl"
               />
             </div>
 
             <Button
               type="submit"
+              disabled={loading}
               className="w-full bg-gradient-to-r from-[var(--green-mid)] to-[var(--green-light)] hover:from-[var(--green-deep)] hover:to-[var(--green-mid)] text-white font-cairo text-lg py-6"
             >
-              تسجيل الدخول
+              {loading ? 'جاري التحميل...' : isLogin ? 'تسجيل الدخول' : 'إنشاء حساب'}
             </Button>
           </form>
 
-          {/* WhatsApp Share */}
           <div className="mt-6">
             <Button
               onClick={handleWhatsAppShare}
@@ -178,7 +211,6 @@ const LoginPage = () => {
             </Button>
           </div>
 
-          {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-sm font-cairo text-gray-600">
               🌴 معاً نحو واحات أكثر ازدهاراً

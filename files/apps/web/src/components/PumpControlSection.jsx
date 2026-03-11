@@ -6,26 +6,19 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { usePumpLogs } from '@/hooks/usePumpLogs.js';
-import pb from '@/lib/pocketbaseClient';
+import { db } from '@/lib/firebaseClient';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext.jsx';
 
 const PumpControlSection = ({ currentWaterLevel }) => {
   const { toast } = useToast();
   const { user } = useAuth();
   const { logs, loading: logsLoading, refetch: refetchLogs } = usePumpLogs();
-  
+
   const [isPumpOn, setIsPumpOn] = useState(false);
   const [isAutoMode, setIsAutoMode] = useState(true);
-  const [schedules, setSchedules] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (user) {
-      fetchSchedules();
-    }
-  }, [user]);
-
-  // Auto-stop logic
   useEffect(() => {
     if (isAutoMode && isPumpOn && currentWaterLevel >= 100) {
       handlePumpToggle(false, 'auto_stop');
@@ -36,36 +29,22 @@ const PumpControlSection = ({ currentWaterLevel }) => {
     }
   }, [currentWaterLevel, isAutoMode, isPumpOn]);
 
-  const fetchSchedules = async () => {
-    try {
-      const records = await pb.collection('pump_schedules').getFullList({
-        filter: `user_id = "${user.id}"`,
-        $autoCancel: false
-      });
-      setSchedules(records);
-    } catch (error) {
-      console.error('Error fetching schedules:', error);
-    }
-  };
-
   const handlePumpToggle = async (newState, reason = 'manual') => {
     try {
       setLoading(true);
-      
-      // Simulate API call to Arduino
+
       await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Log the action
-      await pb.collection('pump_logs').create({
+
+      await addDoc(collection(db, 'pump_logs'), {
         action: newState ? 'start' : 'stop',
         mode: isAutoMode ? 'auto' : 'manual',
         reason: reason,
-        timestamp: new Date().toISOString()
-      }, { $autoCancel: false });
+        timestamp: serverTimestamp()
+      });
 
       setIsPumpOn(newState);
       refetchLogs();
-      
+
       toast({
         title: newState ? '✅ تم تشغيل المضخة' : '🛑 تم إيقاف المضخة',
         description: `الوضع: ${isAutoMode ? 'تلقائي' : 'يدوي'}`,
@@ -117,8 +96,8 @@ const PumpControlSection = ({ currentWaterLevel }) => {
             onClick={() => handlePumpToggle(!isPumpOn)}
             disabled={loading || (isAutoMode && currentWaterLevel >= 100)}
             className={`w-32 h-32 rounded-full flex flex-col items-center justify-center gap-2 shadow-xl transition-colors ${
-              isPumpOn 
-                ? 'bg-red-500 hover:bg-red-600 text-white' 
+              isPumpOn
+                ? 'bg-red-500 hover:bg-red-600 text-white'
                 : 'bg-[var(--green-mid)] hover:bg-[var(--green-deep)] text-white'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
@@ -127,7 +106,7 @@ const PumpControlSection = ({ currentWaterLevel }) => {
               {isPumpOn ? 'إيقاف' : 'تشغيل'}
             </span>
           </motion.button>
-          
+
           {isAutoMode && currentWaterLevel >= 100 && (
             <p className="mt-4 text-sm font-cairo text-orange-600 flex items-center gap-1">
               <AlertCircle className="w-4 h-4" />
@@ -177,7 +156,7 @@ const PumpControlSection = ({ currentWaterLevel }) => {
                       <span className="text-gray-500 text-xs">({log.mode})</span>
                     </div>
                     <span className="text-gray-500" dir="ltr">
-                      {new Date(log.timestamp).toLocaleTimeString('ar-MA')}
+                      {log.timestamp?.toDate ? new Date(log.timestamp.toDate()).toLocaleTimeString('ar-MA') : ''}
                     </span>
                   </div>
                 ))

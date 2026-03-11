@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import pb from '@/lib/pocketbaseClient';
+import { db } from '@/lib/firebaseClient';
+import {
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  where
+} from 'firebase/firestore';
 
 export const useGroupsAndPosts = () => {
   const [groups, setGroups] = useState([]);
@@ -9,12 +16,9 @@ export const useGroupsAndPosts = () => {
 
   const fetchGroups = useCallback(async () => {
     try {
-      const records = await pb.collection('groups').getFullList({
-        sort: '-created',
-        expand: 'creator_id',
-        $autoCancel: false
-      });
-      setGroups(records);
+      const q = query(collection(db, 'groups'), orderBy('created', 'desc'));
+      const snapshot = await getDocs(q);
+      setGroups(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     } catch (err) {
       console.error('Error fetching groups:', err);
       setError(err.message);
@@ -24,25 +28,28 @@ export const useGroupsAndPosts = () => {
   const fetchPosts = useCallback(async (groupId = null, searchQuery = '') => {
     try {
       setLoading(true);
-      let filter = '';
-      
+      let q;
+
       if (groupId) {
-        filter = `group_id = "${groupId}"`;
-      }
-      
-      if (searchQuery) {
-        const searchFilter = `content ~ "${searchQuery}"`;
-        filter = filter ? `${filter} && ${searchFilter}` : searchFilter;
+        q = query(
+          collection(db, 'posts'),
+          where('group_id', '==', groupId),
+          orderBy('created', 'desc')
+        );
+      } else {
+        q = query(collection(db, 'posts'), orderBy('created', 'desc'));
       }
 
-      const records = await pb.collection('posts').getList(1, 50, {
-        sort: '-created',
-        filter: filter,
-        expand: 'author_id,group_id',
-        $autoCancel: false
-      });
-      
-      setPosts(records.items);
+      const snapshot = await getDocs(q);
+      let data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+      if (searchQuery) {
+        data = data.filter(post =>
+          post.content?.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+      }
+
+      setPosts(data);
     } catch (err) {
       console.error('Error fetching posts:', err);
       setError(err.message);
@@ -56,12 +63,12 @@ export const useGroupsAndPosts = () => {
     fetchPosts();
   }, [fetchGroups, fetchPosts]);
 
-  return { 
-    groups, 
-    posts, 
-    loading, 
-    error, 
-    refetchGroups: fetchGroups, 
-    refetchPosts: fetchPosts 
+  return {
+    groups,
+    posts,
+    loading,
+    error,
+    refetchGroups: fetchGroups,
+    refetchPosts: fetchPosts
   };
 };

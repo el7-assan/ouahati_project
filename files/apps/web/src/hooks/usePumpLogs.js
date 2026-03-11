@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import pb from '@/lib/pocketbaseClient';
+import { db } from '@/lib/firebaseClient';
+import {
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  limit
+} from 'firebase/firestore';
 
 export const usePumpLogs = (refreshInterval = 60000) => {
   const [logs, setLogs] = useState([]);
@@ -10,13 +17,14 @@ export const usePumpLogs = (refreshInterval = 60000) => {
     try {
       setLoading(true);
       setError(null);
-      
-      const records = await pb.collection('pump_logs').getList(1, 50, {
-        sort: '-timestamp',
-        $autoCancel: false
-      });
 
-      setLogs(records.items);
+      const q = query(
+        collection(db, 'pump_logs'),
+        orderBy('timestamp', 'desc'),
+        limit(50)
+      );
+      const snapshot = await getDocs(q);
+      setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     } catch (err) {
       console.error('Error fetching pump logs:', err);
       setError(err.message);
@@ -27,7 +35,6 @@ export const usePumpLogs = (refreshInterval = 60000) => {
 
   useEffect(() => {
     fetchLogs();
-    
     const interval = setInterval(fetchLogs, refreshInterval);
     return () => clearInterval(interval);
   }, [fetchLogs, refreshInterval]);
